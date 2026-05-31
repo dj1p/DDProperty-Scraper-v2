@@ -16,6 +16,7 @@ await Actor.init();
 const input = await Actor.getInput() ?? {};
 
 const {
+    startUrls        = [],
     listingType      = 'rent',
     regionCode       = 'TH10',
     bedrooms         = [],
