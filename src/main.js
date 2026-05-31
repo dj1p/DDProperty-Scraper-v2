@@ -1,16 +1,14 @@
 /**
  * DDProperty.com Scraper
- *
- * Scrapes property listings from DDProperty Thailand.
- * Uses Playwright (Chromium) to handle JS-rendered content.
+ * Builds search URL from structured input fields.
  */
 
 import { Actor, log } from 'apify';
-import { PlaywrightCrawler, Dataset, RequestQueue } from 'crawlee';
+import { PlaywrightCrawler, Dataset } from 'crawlee';
 import { createPlaywrightRouter } from 'crawlee';
 
 const LABEL_LISTING_PAGE = 'LISTING_PAGE';
-const LABEL_DETAIL_PAGE = 'DETAIL_PAGE';
+const LABEL_DETAIL_PAGE  = 'DETAIL_PAGE';
 
 await Actor.init();
 
@@ -18,17 +16,64 @@ await Actor.init();
 const input = await Actor.getInput() ?? {};
 
 const {
-    startUrls = [
-        {
-            url: 'https://www.ddproperty.com/en/property-for-rent?listingType=rent&isCommercial=false&maxPrice=60000&minSize=80&regionCode=TH10&bedrooms=2&bedrooms=3&bedrooms=4&bedrooms=5&distanceToMRT=0.75',
-        },
-    ],
-    maxListings = 100,
-    maxConcurrency = 3,
+    listingType      = 'rent',
+    regionCode       = 'TH10',
+    bedrooms         = [],
+    minPrice         = 0,
+    maxPrice         = 0,
+    minSize          = 0,
+    maxSize          = 0,
+    propertyType     = '',
+    distanceToMRT    = 0,
+    freetext         = '',
+    isCommercial     = false,
+    maxListings      = 100,
+    maxConcurrency   = 3,
     proxyConfiguration: proxyConfig = { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'] },
 } = input;
 
-log.info('Starting DDProperty scraper', { maxListings, maxConcurrency });
+// ── Build search URL from fields ──────────────────────────────────────────────
+function buildSearchUrl() {
+    const base = `https://www.ddproperty.com/en/property-for-${listingType}`;
+    const params = new URLSearchParams();
+
+    params.set('listingType', listingType);
+    params.set('isCommercial', String(isCommercial));
+    params.set('page', '1');
+
+    if (regionCode)    params.set('regionCode', regionCode);
+    if (minPrice > 0)  params.set('minPrice', String(minPrice));
+    if (maxPrice > 0)  params.set('maxPrice', String(maxPrice));
+    if (minSize > 0)   params.set('minSize', String(minSize));
+    if (maxSize > 0)   params.set('maxSize', String(maxSize));
+    if (propertyType)  params.set('propertyType', propertyType);
+    if (distanceToMRT > 0) params.set('distanceToMRT', String(distanceToMRT));
+    if (freetext)      params.set('_freetextDisplay', freetext);
+
+    // Bedrooms: DDProperty uses repeated params (?bedrooms=2&bedrooms=3)
+    for (const b of bedrooms) {
+        params.append('bedrooms', String(b));
+    }
+
+    return `${base}?${params.toString()}`;
+}
+
+// ── Decide which URLs to use ──────────────────────────────────────────────────
+let initialRequests;
+
+if (startUrls && startUrls.length > 0) {
+    // Use provided URLs directly
+    initialRequests = startUrls.map((item) => ({
+        url: typeof item === 'string' ? item : item.url,
+        label: LABEL_LISTING_PAGE,
+    }));
+    log.info(`Using ${initialRequests.length} provided URL(s)`, { urls: initialRequests.map((r) => r.url) });
+} else {
+    // Build URL from filter fields
+    const builtUrl = buildSearchUrl();
+    initialRequests = [{ url: builtUrl, label: LABEL_LISTING_PAGE }];
+    log.info('No startUrls provided — built search URL from filters', { url: builtUrl });
+}
 
 // ── Proxy ─────────────────────────────────────────────────────────────────────
 const proxyConfiguration = await Actor.createProxyConfiguration(proxyConfig);
@@ -39,261 +84,128 @@ let listingsScraped = 0;
 // ── Router ────────────────────────────────────────────────────────────────────
 const router = createPlaywrightRouter();
 
-/**
- * Listing/search results page handler.
- * Enqueues detail pages and handles pagination.
- */
-router.addHandler(LABEL_LISTING_PAGE, async ({ page, request, enqueueLinks, crawler }) => {
+router.addHandler(LABEL_LISTING_PAGE, async ({ page, request, crawler }) => {
     log.info(`Scraping listing page: ${request.url}`);
 
-    // Wait for property cards to load
-    await page.waitForSelector('[data-testid="listing-card-container"], .listing-item, article[class*="listing"]', {
-        timeout: 30_000,
-    }).catch(() => log.warning('Listing card selector timed out, continuing anyway'));
+    await page.waitForSelector(
+        '[data-testid="listing-card-container"], .listing-item, article[class*="listing"]',
+        { timeout: 30_000 }
+    ).catch(() => log.warning('Listing card selector timed out'));
 
-    // Collect all property detail links on the page
-    const detailLinks = await page.$$eval(
-        'a[href*="/en/property-for-"], a[href*="/property/"]',
-        (anchors) =>
-            anchors
-                .map((a) => a.href)
-                .filter(
-                    (href) =>
-                        href.includes('ddproperty.com') &&
-                        !href.includes('?') === false &&
-                        (href.match(/\/\d+\/?$/) || href.includes('-for-rent-') || href.includes('-for-sale-'))
-                )
-    );
-
-    // More targeted: get only listing detail URLs (end in numeric ID)
-    const listingLinks = await page.$$eval(
-        'a[data-testid="listing-card-link"], a[class*="listing__link"], .listing-result a, [class*="PropertyCard"] a',
+    // Collect detail page links
+    const links = await page.$$eval(
+        'a[data-testid="listing-card-link"], [class*="PropertyCard"] a, .listing-result a',
         (anchors) => [...new Set(anchors.map((a) => a.href).filter(Boolean))]
     );
 
-    const links = [...new Set([...detailLinks, ...listingLinks])].filter(
-        (url) => url.includes('ddproperty.com/en/') && url !== request.url
-    );
+    log.info(`Found ${links.length} listing links`);
 
-    log.info(`Found ${links.length} potential listing links on page`);
-
-    // Enqueue detail pages (respecting maxListings)
     for (const url of links) {
-        if (maxListings > 0 && listingsScraped + (await crawler.requestQueue?.handledCount() ?? 0) >= maxListings) break;
+        if (maxListings > 0 && listingsScraped >= maxListings) break;
         await crawler.addRequests([{ url, label: LABEL_DETAIL_PAGE }]);
     }
 
     // ── Pagination ────────────────────────────────────────────────────────────
-    const currentUrl = new URL(request.url);
-    const currentPage = parseInt(currentUrl.searchParams.get('page') ?? '1', 10);
+    if (maxListings === 0 || listingsScraped < maxListings) {
+        const currentUrl   = new URL(request.url);
+        const currentPage  = parseInt(currentUrl.searchParams.get('page') ?? '1', 10);
 
-    // Check if there's a "next" page button that's enabled
-    const hasNextPage = await page.$$eval(
-        'a[aria-label="Next page"], a[data-testid="pagination-next"], .pagination__next:not(.disabled)',
-        (els) => els.length > 0
-    );
+        const hasNext = await page.$$eval(
+            'a[aria-label="Next page"], a[data-testid="pagination-next"], .pagination__next:not(.disabled)',
+            (els) => els.length > 0
+        );
 
-    if (hasNextPage && (maxListings === 0 || listingsScraped < maxListings)) {
-        currentUrl.searchParams.set('page', String(currentPage + 1));
-        const nextPageUrl = currentUrl.toString();
-        log.info(`Queuing next page: ${nextPageUrl}`);
-        await crawler.addRequests([{ url: nextPageUrl, label: LABEL_LISTING_PAGE }]);
+        if (hasNext) {
+            currentUrl.searchParams.set('page', String(currentPage + 1));
+            log.info(`Queuing page ${currentPage + 1}`);
+            await crawler.addRequests([{ url: currentUrl.toString(), label: LABEL_LISTING_PAGE }]);
+        }
     }
 });
 
-/**
- * Individual property detail page handler.
- * Extracts all relevant fields from a listing.
- */
 router.addHandler(LABEL_DETAIL_PAGE, async ({ page, request }) => {
-    if (maxListings > 0 && listingsScraped >= maxListings) {
-        log.info('Max listings reached, skipping detail page');
-        return;
-    }
+    if (maxListings > 0 && listingsScraped >= maxListings) return;
 
-    log.info(`Scraping detail page: ${request.url}`);
+    log.info(`Scraping detail: ${request.url}`);
 
-    // Wait for the main content
-    await page.waitForSelector('h1, [data-testid="listing-title"], .listing-detail__title', {
-        timeout: 30_000,
-    }).catch(() => {});
+    await page.waitForSelector('h1, [data-testid="listing-title"]', { timeout: 30_000 }).catch(() => {});
 
-    // ── Extract structured data from the page ─────────────────────────────────
     const data = await page.evaluate(() => {
-        const getText = (selector) =>
-            document.querySelector(selector)?.textContent?.trim() ?? null;
+        const getText = (sel) => document.querySelector(sel)?.textContent?.trim() ?? null;
 
-        const getNumber = (selector) => {
-            const val = document.querySelector(selector)?.textContent?.trim();
-            return val ? parseFloat(val.replace(/[^0-9.]/g, '')) : null;
-        };
-
-        // Try to pull from JSON-LD structured data first (most reliable)
         const jsonLd = Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
-            .map((s) => {
-                try { return JSON.parse(s.textContent); } catch { return null; }
-            })
+            .map((s) => { try { return JSON.parse(s.textContent); } catch { return null; } })
             .filter(Boolean)
             .find((d) => d['@type'] === 'RealEstateListing' || d.name);
 
-        // Price
-        const priceRaw =
-            getText('[data-testid="price-value"]') ??
-            getText('.price__value') ??
-            getText('[class*="price"]');
-
-        // Title
-        const title =
-            getText('h1') ??
-            getText('[data-testid="listing-title"]') ??
-            getText('.listing-detail__title');
-
-        // Location/address
-        const address =
-            getText('[data-testid="listing-location"]') ??
-            getText('.address__text') ??
-            getText('[class*="location"]');
-
-        // Property type
-        const propertyType =
-            getText('[data-testid="property-type"]') ??
-            getText('[class*="propertyType"]');
-
-        // Bedrooms / bathrooms / size
-        const bedroomsRaw =
-            getText('[data-testid="beds"]') ??
-            getText('[aria-label*="bedroom"]') ??
-            getText('[class*="bedroom"]');
-
-        const bathroomsRaw =
-            getText('[data-testid="baths"]') ??
-            getText('[aria-label*="bathroom"]') ??
-            getText('[class*="bathroom"]');
-
-        const sizeRaw =
-            getText('[data-testid="floor-size"]') ??
-            getText('[class*="floorSize"]') ??
-            getText('[class*="size"]');
-
-        // Floor level
-        const floorRaw = getText('[data-testid="floor-level"]') ?? getText('[class*="floor"]');
-
-        // Description
-        const description =
-            getText('[data-testid="listing-description"]') ??
-            getText('.description__text') ??
-            getText('[class*="description"]');
-
-        // Agent/developer
-        const agentName =
-            getText('[data-testid="agent-name"]') ??
-            getText('[class*="agentName"]') ??
-            getText('[class*="agent"] .name');
-
-        // Images
-        const images = Array.from(
-            document.querySelectorAll(
-                '[data-testid="gallery-image"] img, .gallery__image img, [class*="Gallery"] img'
-            )
-        )
-            .map((img) => img.src || img.dataset.src)
-            .filter(Boolean)
-            .slice(0, 10);
-
-        // Facilities / amenities tags
-        const facilities = Array.from(
-            document.querySelectorAll(
-                '[data-testid="facility-item"], [class*="facility"] span, [class*="amenity"]'
-            )
-        )
-            .map((el) => el.textContent?.trim())
-            .filter(Boolean);
-
-        // Listing ID from URL or page
-        const listingIdMatch =
-            document.querySelector('[data-testid="listing-id"]')?.textContent?.trim() ??
-            window.location.pathname.match(/\d{5,}$/)?.[0];
-
         return {
-            title,
-            priceRaw,
-            address,
-            propertyType,
-            bedroomsRaw,
-            bathroomsRaw,
-            sizeRaw,
-            floorRaw,
-            description,
-            agentName,
-            images,
-            facilities,
-            listingId: listingIdMatch ?? null,
+            title:        getText('h1') ?? getText('[data-testid="listing-title"]'),
+            priceRaw:     getText('[data-testid="price-value"]') ?? getText('.price__value') ?? getText('[class*="price"]'),
+            address:      getText('[data-testid="listing-location"]') ?? getText('.address__text'),
+            propertyType: getText('[data-testid="property-type"]') ?? getText('[class*="propertyType"]'),
+            bedroomsRaw:  getText('[data-testid="beds"]') ?? getText('[aria-label*="bedroom"]'),
+            bathroomsRaw: getText('[data-testid="baths"]') ?? getText('[aria-label*="bathroom"]'),
+            sizeRaw:      getText('[data-testid="floor-size"]') ?? getText('[class*="floorSize"]'),
+            floorRaw:     getText('[data-testid="floor-level"]'),
+            description:  getText('[data-testid="listing-description"]') ?? getText('.description__text'),
+            agentName:    getText('[data-testid="agent-name"]') ?? getText('[class*="agentName"]'),
+            images:       Array.from(document.querySelectorAll('[data-testid="gallery-image"] img, .gallery__image img'))
+                              .map((img) => img.src || img.dataset.src).filter(Boolean).slice(0, 10),
+            facilities:   Array.from(document.querySelectorAll('[data-testid="facility-item"], [class*="facility"] span'))
+                              .map((el) => el.textContent?.trim()).filter(Boolean),
+            listingId:    document.querySelector('[data-testid="listing-id"]')?.textContent?.trim()
+                          ?? window.location.pathname.match(/\d{5,}$/)?.[0] ?? null,
             jsonLd,
         };
     });
 
-    // ── Parse / normalise ─────────────────────────────────────────────────────
-    const parseNumber = (raw) => {
+    const toNum = (raw) => {
         if (!raw) return null;
-        const cleaned = raw.replace(/[^0-9.]/g, '');
-        return cleaned ? parseFloat(cleaned) : null;
+        const n = parseFloat(raw.replace(/[^0-9.]/g, ''));
+        return isNaN(n) ? null : n;
     };
 
     const listing = {
-        url: request.url,
-        listingId: data.listingId,
-        title: data.title,
-        priceThb: parseNumber(data.priceRaw),
+        url:          request.url,
+        listingId:    data.listingId,
+        title:        data.title,
+        priceThb:     toNum(data.priceRaw),
         priceDisplay: data.priceRaw,
-        address: data.address,
+        address:      data.address,
         propertyType: data.propertyType,
-        bedrooms: parseNumber(data.bedroomsRaw),
-        bathrooms: parseNumber(data.bathroomsRaw),
-        sizeSqm: parseNumber(data.sizeRaw),
-        sizeDisplay: data.sizeRaw,
-        floor: data.floorRaw,
-        description: data.description,
-        agentName: data.agentName,
-        images: data.images,
-        facilities: data.facilities,
-        scrapedAt: new Date().toISOString(),
-        // JSON-LD enrichment if available
-        ...(data.jsonLd
-            ? {
-                  jsonLdName: data.jsonLd.name,
-                  jsonLdPrice: data.jsonLd.offers?.price ?? null,
-                  jsonLdPriceCurrency: data.jsonLd.offers?.priceCurrency ?? null,
-                  jsonLdAddress: data.jsonLd.address?.streetAddress ?? null,
-              }
-            : {}),
+        bedrooms:     toNum(data.bedroomsRaw),
+        bathrooms:    toNum(data.bathroomsRaw),
+        sizeSqm:      toNum(data.sizeRaw),
+        sizeDisplay:  data.sizeRaw,
+        floor:        data.floorRaw,
+        description:  data.description,
+        agentName:    data.agentName,
+        images:       data.images,
+        facilities:   data.facilities,
+        scrapedAt:    new Date().toISOString(),
     };
 
-    // Skip if we got basically nothing (probably hit a CAPTCHA or redirect)
-    if (!listing.title && !listing.priceThb && !listing.address) {
-        log.warning(`Empty listing at ${request.url} — possible CAPTCHA/redirect, skipping`);
+    if (!listing.title && !listing.priceThb) {
+        log.warning(`Empty listing at ${request.url} — possible block, skipping`);
         return;
     }
 
     await Dataset.pushData(listing);
     listingsScraped++;
-    log.info(`Saved listing #${listingsScraped}: ${listing.title ?? request.url}`);
+    log.info(`Saved #${listingsScraped}: ${listing.title ?? request.url}`);
 });
 
-// Fallback for any unhandled label
 router.addDefaultHandler(async ({ request, enqueueLinks }) => {
-    log.info(`Default handler: ${request.url} — treating as listing page`);
-    await enqueueLinks({
-        selector: 'a[href*="/en/property-for-"]',
-        label: LABEL_LISTING_PAGE,
-    });
+    log.info(`Default handler for: ${request.url}`);
+    await enqueueLinks({ selector: 'a[href*="/en/property-for-"]', label: LABEL_LISTING_PAGE });
 });
 
-// ── Crawler ────────────────────────────────────────────────────────────────────
+// ── Crawler ───────────────────────────────────────────────────────────────────
 const crawler = new PlaywrightCrawler({
     proxyConfiguration,
     requestHandler: router,
     maxConcurrency,
-    maxRequestsPerCrawl: maxListings > 0 ? maxListings * 5 : undefined, // safety cap
+    maxRequestsPerCrawl: maxListings > 0 ? maxListings * 5 : undefined,
     requestHandlerTimeoutSecs: 60,
     navigationTimeoutSecs: 45,
     retryOnBlocked: true,
@@ -302,17 +214,12 @@ const crawler = new PlaywrightCrawler({
     launchContext: {
         launchOptions: {
             headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-blink-features=AutomationControlled',
-            ],
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled'],
         },
     },
 
     browserPoolOptions: {
-        useFingerprints: true,         // Randomise browser fingerprints
+        useFingerprints: true,
         fingerprintOptions: {
             fingerprintGeneratorOptions: {
                 browsers: ['chrome'],
@@ -323,27 +230,18 @@ const crawler = new PlaywrightCrawler({
 
     preNavigationHooks: [
         async ({ page }) => {
-            // Mask automation signals
             await page.addInitScript(() => {
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
             });
-            // Set realistic headers
             await page.setExtraHTTPHeaders({
                 'Accept-Language': 'en-US,en;q=0.9,th;q=0.8',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             });
         },
     ],
 });
 
-// ── Seed the queue ─────────────────────────────────────────────────────────────
-const initialRequests = startUrls.map((item) => ({
-    url: typeof item === 'string' ? item : item.url,
-    label: LABEL_LISTING_PAGE,
-}));
-
 await crawler.run(initialRequests);
 
-log.info(`Scraping complete. Total listings saved: ${listingsScraped}`);
-
+log.info(`Done. Total listings saved: ${listingsScraped}`);
 await Actor.exit();
