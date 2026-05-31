@@ -1,11 +1,10 @@
 /**
  * DDProperty.com Scraper
- * Builds search URL from structured input fields.
+ * Builds search URL from structured input fields, or uses provided URLs directly.
  */
 
 import { Actor, log } from 'apify';
-import { PlaywrightCrawler, Dataset } from 'crawlee';
-import { createPlaywrightRouter } from 'crawlee';
+import { PlaywrightCrawler, Dataset, createPlaywrightRouter } from 'crawlee';
 
 const LABEL_LISTING_PAGE = 'LISTING_PAGE';
 const LABEL_DETAIL_PAGE  = 'DETAIL_PAGE';
@@ -33,25 +32,25 @@ const {
     proxyConfiguration: proxyConfig = { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'] },
 } = input;
 
-// ── Build search URL from fields ──────────────────────────────────────────────
+// ── Build search URL from filter fields ───────────────────────────────────────
 function buildSearchUrl() {
-    const base = `https://www.ddproperty.com/en/property-for-${listingType}`;
+    const base   = `https://www.ddproperty.com/en/property-for-${listingType}`;
     const params = new URLSearchParams();
 
-    params.set('listingType', listingType);
+    params.set('listingType',  listingType);
     params.set('isCommercial', String(isCommercial));
-    params.set('page', '1');
+    params.set('page',         '1');
 
-    if (regionCode)    params.set('regionCode', regionCode);
-    if (minPrice > 0)  params.set('minPrice', String(minPrice));
-    if (maxPrice > 0)  params.set('maxPrice', String(maxPrice));
-    if (minSize > 0)   params.set('minSize', String(minSize));
-    if (maxSize > 0)   params.set('maxSize', String(maxSize));
-    if (propertyType)  params.set('propertyType', propertyType);
-    if (distanceToMRT)     params.set('distanceToMRT', distanceToMRT);
-    if (freetext)      params.set('_freetextDisplay', freetext);
+    if (regionCode)    params.set('regionCode',       regionCode);
+    if (minPrice > 0)  params.set('minPrice',          String(minPrice));
+    if (maxPrice > 0)  params.set('maxPrice',          String(maxPrice));
+    if (minSize > 0)   params.set('minSize',           String(minSize));
+    if (maxSize > 0)   params.set('maxSize',           String(maxSize));
+    if (propertyType)  params.set('propertyType',      propertyType);
+    if (distanceToMRT) params.set('distanceToMRT',     distanceToMRT);
+    if (freetext)      params.set('_freetextDisplay',  freetext);
 
-    // Bedrooms: DDProperty uses repeated params (?bedrooms=2&bedrooms=3)
+    // DDProperty uses repeated params for bedrooms: ?bedrooms=2&bedrooms=3
     for (const b of bedrooms) {
         params.append('bedrooms', String(b));
     }
@@ -59,46 +58,45 @@ function buildSearchUrl() {
     return `${base}?${params.toString()}`;
 }
 
-// ── Decide which URLs to use ──────────────────────────────────────────────────
+// ── Decide starting URLs ──────────────────────────────────────────────────────
 let initialRequests;
 
 if (startUrls && startUrls.length > 0) {
-    // Use provided URLs directly
     initialRequests = startUrls.map((item) => ({
-        url: typeof item === 'string' ? item : item.url,
+        url:   typeof item === 'string' ? item : item.url,
         label: LABEL_LISTING_PAGE,
     }));
-    log.info(`Using ${initialRequests.length} provided URL(s)`, { urls: initialRequests.map((r) => r.url) });
+    log.info(`Using ${initialRequests.length} provided URL(s)`);
 } else {
-    // Build URL from filter fields
-    const builtUrl = buildSearchUrl();
+    const builtUrl  = buildSearchUrl();
     initialRequests = [{ url: builtUrl, label: LABEL_LISTING_PAGE }];
-    log.info('No startUrls provided — built search URL from filters', { url: builtUrl });
+    log.info(`Built search URL from filters: ${builtUrl}`);
 }
 
 // ── Proxy ─────────────────────────────────────────────────────────────────────
 const proxyConfiguration = await Actor.createProxyConfiguration(proxyConfig);
 
-// ── Tracking ──────────────────────────────────────────────────────────────────
+// ── State ─────────────────────────────────────────────────────────────────────
 let listingsScraped = 0;
 
 // ── Router ────────────────────────────────────────────────────────────────────
 const router = createPlaywrightRouter();
 
+// Search results / listing page
 router.addHandler(LABEL_LISTING_PAGE, async ({ page, request, crawler }) => {
-    log.info(`Scraping listing page: ${request.url}`);
+    log.info(`Listing page: ${request.url}`);
 
+    // Wait for cards to appear (with graceful fallback)
     await page.waitForSelector(
         '[data-testid="listing-card-container"], .listing-item, article[class*="listing"]',
         { timeout: 30_000 }
-    ).catch(() => log.warning('Listing card selector timed out'));
+    ).catch(() => log.warning('Card selector timed out — continuing anyway'));
 
-    // Collect detail page links
+    // Grab all detail-page links
     const links = await page.$$eval(
         'a[data-testid="listing-card-link"], [class*="PropertyCard"] a, .listing-result a',
         (anchors) => [...new Set(anchors.map((a) => a.href).filter(Boolean))]
     );
-
     log.info(`Found ${links.length} listing links`);
 
     for (const url of links) {
@@ -106,10 +104,10 @@ router.addHandler(LABEL_LISTING_PAGE, async ({ page, request, crawler }) => {
         await crawler.addRequests([{ url, label: LABEL_DETAIL_PAGE }]);
     }
 
-    // ── Pagination ────────────────────────────────────────────────────────────
+    // Pagination
     if (maxListings === 0 || listingsScraped < maxListings) {
-        const currentUrl   = new URL(request.url);
-        const currentPage  = parseInt(currentUrl.searchParams.get('page') ?? '1', 10);
+        const currentUrl  = new URL(request.url);
+        const currentPage = parseInt(currentUrl.searchParams.get('page') ?? '1', 10);
 
         const hasNext = await page.$$eval(
             'a[aria-label="Next page"], a[data-testid="pagination-next"], .pagination__next:not(.disabled)',
@@ -124,12 +122,14 @@ router.addHandler(LABEL_LISTING_PAGE, async ({ page, request, crawler }) => {
     }
 });
 
+// Individual property detail page
 router.addHandler(LABEL_DETAIL_PAGE, async ({ page, request }) => {
     if (maxListings > 0 && listingsScraped >= maxListings) return;
 
-    log.info(`Scraping detail: ${request.url}`);
+    log.info(`Detail page: ${request.url}`);
 
-    await page.waitForSelector('h1, [data-testid="listing-title"]', { timeout: 30_000 }).catch(() => {});
+    await page.waitForSelector('h1, [data-testid="listing-title"]', { timeout: 30_000 })
+        .catch(() => {});
 
     const data = await page.evaluate(() => {
         const getText = (sel) => document.querySelector(sel)?.textContent?.trim() ?? null;
@@ -150,10 +150,12 @@ router.addHandler(LABEL_DETAIL_PAGE, async ({ page, request }) => {
             floorRaw:     getText('[data-testid="floor-level"]'),
             description:  getText('[data-testid="listing-description"]') ?? getText('.description__text'),
             agentName:    getText('[data-testid="agent-name"]') ?? getText('[class*="agentName"]'),
-            images:       Array.from(document.querySelectorAll('[data-testid="gallery-image"] img, .gallery__image img'))
-                              .map((img) => img.src || img.dataset.src).filter(Boolean).slice(0, 10),
-            facilities:   Array.from(document.querySelectorAll('[data-testid="facility-item"], [class*="facility"] span'))
-                              .map((el) => el.textContent?.trim()).filter(Boolean),
+            images:       Array.from(document.querySelectorAll(
+                              '[data-testid="gallery-image"] img, .gallery__image img'
+                          )).map((img) => img.src || img.dataset?.src).filter(Boolean).slice(0, 10),
+            facilities:   Array.from(document.querySelectorAll(
+                              '[data-testid="facility-item"], [class*="facility"] span'
+                          )).map((el) => el.textContent?.trim()).filter(Boolean),
             listingId:    document.querySelector('[data-testid="listing-id"]')?.textContent?.trim()
                           ?? window.location.pathname.match(/\d{5,}$/)?.[0] ?? null,
             jsonLd,
@@ -197,35 +199,30 @@ router.addHandler(LABEL_DETAIL_PAGE, async ({ page, request }) => {
 });
 
 router.addDefaultHandler(async ({ request, enqueueLinks }) => {
-    log.info(`Default handler for: ${request.url}`);
+    log.info(`Default handler: ${request.url}`);
     await enqueueLinks({ selector: 'a[href*="/en/property-for-"]', label: LABEL_LISTING_PAGE });
 });
 
 // ── Crawler ───────────────────────────────────────────────────────────────────
 const crawler = new PlaywrightCrawler({
     proxyConfiguration,
-    requestHandler: router,
+    requestHandler:              router,
     maxConcurrency,
-    maxRequestsPerCrawl: maxListings > 0 ? maxListings * 5 : undefined,
-    requestHandlerTimeoutSecs: 60,
-    navigationTimeoutSecs: 45,
-    retryOnBlocked: true,
-    maxSessionRotations: 10,
+    maxRequestsPerCrawl:         maxListings > 0 ? maxListings * 5 : undefined,
+    requestHandlerTimeoutSecs:   60,
+    navigationTimeoutSecs:       45,
+    retryOnBlocked:              true,
+    maxSessionRotations:         10,
 
     launchContext: {
         launchOptions: {
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled'],
-        },
-    },
-
-    browserPoolOptions: {
-        useFingerprints: true,
-        fingerprintOptions: {
-            fingerprintGeneratorOptions: {
-                browsers: ['chrome'],
-                operatingSystems: ['windows', 'macos'],
-            },
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-blink-features=AutomationControlled',
+            ],
         },
     },
 
@@ -236,7 +233,7 @@ const crawler = new PlaywrightCrawler({
             });
             await page.setExtraHTTPHeaders({
                 'Accept-Language': 'en-US,en;q=0.9,th;q=0.8',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             });
         },
     ],
