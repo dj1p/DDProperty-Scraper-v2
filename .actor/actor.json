@@ -1,0 +1,19 @@
+{
+  "actorSpecification": 1,
+  "name": "ddproperty-scraper",
+  "title": "DDProperty Scraper",
+  "description": "Scrapes property listings from DDProperty.com (Thailand). Supports filtering by rent/sale, price, size, bedrooms, region, and distance to MRT.",
+  "version": "0.1",
+  "buildTag": "latest",
+  "generatedBy": "Claude Sonnet 4.6 via claude.ai",
+  "environmentVariables": {},
+  "dockerfile": "./Dockerfile",
+  "input": "./input_schema.json",
+  "storages": {
+    "dataset": {
+      "actorSpecification": 1,
+      "fields": {},
+      "views": {}
+    }
+  }
+}
