@@ -199,13 +199,10 @@
     "proxyConfiguration": {
       "title": "Proxy Configuration",
       "type": "object",
-      "description": "Proxy settings. DATACENTER works under LIMITED_PERMISSIONS. Switch to RESIDENTIAL for better success rate if you have access.",
+      "description": "Optional proxy settings. Enable Apify Residential or Datacenter proxies if you have access. Leave disabled to run without a proxy.",
       "editor": "proxy",
       "prefill": {
-        "useApifyProxy": true,
-        "apifyProxyGroups": [
-          "DATACENTER"
-        ]
+        "useApifyProxy": false
       }
     }
   },
