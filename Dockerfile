@@ -1,16 +1,14 @@
-# Apify base image with Node.js and Playwright (Chromium)
+# Apify base image — includes Chromium + Playwright pre-installed
 FROM apify/actor-node-playwright-chrome:20
 
-# Copy dependency manifests first (layer caching)
+# Copy package files and install dependencies
+# --ignore-scripts skips playwright's browser download (already in base image)
 COPY package*.json ./
-
-# Install dependencies
 RUN npm --quiet set progress=false \
-    && npm install --omit=dev --omit=optional \
+    && npm install --omit=dev --omit=optional --ignore-scripts \
     && echo "Dependencies installed."
 
-# Copy source code
+# Copy source
 COPY . ./
 
-# Run the actor
 CMD npm start
