@@ -1,5 +1,4 @@
 {
-  "actorSpecification": 1,
   "title": "DDProperty Scraper Input",
   "description": "Search DDProperty Thailand. Provide Start URLs to use them directly, or fill in the filter fields to build the search automatically.",
   "type": "object",
