@@ -1,0 +1,139 @@
+{
+  "actorSpecification": 1,
+  "title": "DDProperty Scraper Input",
+  "description": "Search DDProperty Thailand. Provide Start URLs to use them directly, or fill in the filter fields to build the search automatically.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "startUrls": {
+      "title": "Start URLs (optional — overrides filters below)",
+      "type": "array",
+      "description": "Paste one or more DDProperty search URLs here. If provided, all filter fields below are ignored.",
+      "editor": "requestListSources"
+    },
+    "listingType": {
+      "title": "Listing Type",
+      "type": "string",
+      "editor": "select",
+      "enum": ["rent", "sale"],
+      "enumTitles": ["For Rent", "For Sale"],
+      "default": "rent"
+    },
+    "regionCode": {
+      "title": "Region / Province",
+      "type": "string",
+      "editor": "select",
+      "enum": ["TH10", "TH11", "TH12", "TH13", "TH14", "TH73", "TH74", "TH83", "TH84", "TH85"],
+      "enumTitles": [
+        "Bangkok (TH10)",
+        "Samut Prakan (TH11)",
+        "Nonthaburi (TH12)",
+        "Pathum Thani (TH13)",
+        "Phra Nakhon Si Ayutthaya (TH14)",
+        "Nakhon Pathom (TH73)",
+        "Samut Sakhon (TH74)",
+        "Phuket (TH83)",
+        "Surat Thani (TH84)",
+        "Krabi (TH85)"
+      ],
+      "default": "TH10"
+    },
+    "bedrooms": {
+      "title": "Bedrooms",
+      "type": "array",
+      "description": "Leave empty for any.",
+      "editor": "select",
+      "items": {
+        "type": "string",
+        "enum": ["0", "1", "2", "3", "4", "5"],
+        "enumTitles": ["Studio", "1 Bed", "2 Beds", "3 Beds", "4 Beds", "5+ Beds"]
+      },
+      "prefill": ["2", "3", "4"]
+    },
+    "minPrice": {
+      "title": "Min Price (฿)",
+      "type": "integer",
+      "editor": "number",
+      "default": 0,
+      "minimum": 0
+    },
+    "maxPrice": {
+      "title": "Max Price (฿)",
+      "type": "integer",
+      "editor": "number",
+      "default": 60000,
+      "minimum": 0
+    },
+    "minSize": {
+      "title": "Min Size (sqm)",
+      "type": "integer",
+      "editor": "number",
+      "default": 80,
+      "minimum": 0
+    },
+    "maxSize": {
+      "title": "Max Size (sqm)",
+      "type": "integer",
+      "description": "Leave at 0 for no maximum.",
+      "editor": "number",
+      "default": 0,
+      "minimum": 0
+    },
+    "propertyType": {
+      "title": "Property Type",
+      "type": "string",
+      "editor": "select",
+      "enum": ["", "condo", "house", "townhouse", "villa", "land", "commercial"],
+      "enumTitles": ["Any", "Condo", "House", "Townhouse", "Villa", "Land", "Commercial"],
+      "default": ""
+    },
+    "distanceToMRT": {
+      "title": "Max Distance to MRT/BTS (km)",
+      "type": "number",
+      "editor": "select",
+      "enum": [0, 0.5, 0.75, 1, 1.5, 2],
+      "enumTitles": ["Any", "500m", "750m", "1 km", "1.5 km", "2 km"],
+      "default": 0
+    },
+    "freetext": {
+      "title": "Area / Keyword",
+      "type": "string",
+      "description": "e.g. 'Ekkamai', 'Thonglor', 'Sukhumvit'",
+      "editor": "textfield",
+      "default": ""
+    },
+    "isCommercial": {
+      "title": "Commercial Properties Only",
+      "type": "boolean",
+      "default": false
+    },
+    "maxListings": {
+      "title": "Max Listings",
+      "type": "integer",
+      "description": "0 = unlimited.",
+      "editor": "number",
+      "default": 100,
+      "minimum": 0
+    },
+    "maxConcurrency": {
+      "title": "Max Concurrency",
+      "type": "integer",
+      "description": "Concurrent browser tabs. Keep at 2–4 to avoid blocks.",
+      "editor": "number",
+      "default": 3,
+      "minimum": 1,
+      "maximum": 10
+    },
+    "proxyConfiguration": {
+      "title": "Proxy Configuration",
+      "type": "object",
+      "description": "Residential proxies strongly recommended.",
+      "editor": "proxy",
+      "prefill": {
+        "useApifyProxy": true,
+        "apifyProxyGroups": ["RESIDENTIAL"]
+      }
+    }
+  },
+  "required": []
+}
