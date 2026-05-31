@@ -29,7 +29,7 @@ const {
     isCommercial     = false,
     maxListings      = 100,
     maxConcurrency   = 3,
-    proxyConfiguration: proxyConfig = { useApifyProxy: true, apifyProxyGroups: ['DATACENTER'] },
+    proxyConfiguration: proxyConfig = null,
 } = input;
 
 // ── Build search URL from filter fields ───────────────────────────────────────
@@ -50,7 +50,6 @@ function buildSearchUrl() {
     if (distanceToMRT) params.set('distanceToMRT',     distanceToMRT);
     if (freetext)      params.set('_freetextDisplay',  freetext);
 
-    // DDProperty uses repeated params for bedrooms: ?bedrooms=2&bedrooms=3
     for (const b of bedrooms) {
         params.append('bedrooms', String(b));
     }
@@ -73,8 +72,19 @@ if (startUrls && startUrls.length > 0) {
     log.info(`Built search URL from filters: ${builtUrl}`);
 }
 
-// ── Proxy ─────────────────────────────────────────────────────────────────────
-const proxyConfiguration = await Actor.createProxyConfiguration(proxyConfig);
+// ── Proxy (optional — gracefully skipped if not configured or not available) ──
+let proxyConfiguration;
+if (proxyConfig) {
+    try {
+        proxyConfiguration = await Actor.createProxyConfiguration(proxyConfig);
+        log.info('Proxy configured successfully');
+    } catch (err) {
+        log.warning(`Proxy setup failed, running without proxy: ${err.message}`);
+        proxyConfiguration = undefined;
+    }
+} else {
+    log.info('No proxy configured — running without proxy');
+}
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let listingsScraped = 0;
@@ -82,17 +92,14 @@ let listingsScraped = 0;
 // ── Router ────────────────────────────────────────────────────────────────────
 const router = createPlaywrightRouter();
 
-// Search results / listing page
 router.addHandler(LABEL_LISTING_PAGE, async ({ page, request, crawler }) => {
     log.info(`Listing page: ${request.url}`);
 
-    // Wait for cards to appear (with graceful fallback)
     await page.waitForSelector(
         '[data-testid="listing-card-container"], .listing-item, article[class*="listing"]',
         { timeout: 30_000 }
     ).catch(() => log.warning('Card selector timed out — continuing anyway'));
 
-    // Grab all detail-page links
     const links = await page.$$eval(
         'a[data-testid="listing-card-link"], [class*="PropertyCard"] a, .listing-result a',
         (anchors) => [...new Set(anchors.map((a) => a.href).filter(Boolean))]
@@ -104,7 +111,6 @@ router.addHandler(LABEL_LISTING_PAGE, async ({ page, request, crawler }) => {
         await crawler.addRequests([{ url, label: LABEL_DETAIL_PAGE }]);
     }
 
-    // Pagination
     if (maxListings === 0 || listingsScraped < maxListings) {
         const currentUrl  = new URL(request.url);
         const currentPage = parseInt(currentUrl.searchParams.get('page') ?? '1', 10);
@@ -122,7 +128,6 @@ router.addHandler(LABEL_LISTING_PAGE, async ({ page, request, crawler }) => {
     }
 });
 
-// Individual property detail page
 router.addHandler(LABEL_DETAIL_PAGE, async ({ page, request }) => {
     if (maxListings > 0 && listingsScraped >= maxListings) return;
 
@@ -205,7 +210,7 @@ router.addDefaultHandler(async ({ request, enqueueLinks }) => {
 
 // ── Crawler ───────────────────────────────────────────────────────────────────
 const crawler = new PlaywrightCrawler({
-    proxyConfiguration,
+    ...(proxyConfiguration ? { proxyConfiguration } : {}),
     requestHandler:              router,
     maxConcurrency,
     maxRequestsPerCrawl:         maxListings > 0 ? maxListings * 5 : undefined,
@@ -222,32 +227,18 @@ const crawler = new PlaywrightCrawler({
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
                 '--disable-blink-features=AutomationControlled',
-                '--disable-infobars',
-                '--window-size=1920,1080',
-                '--lang=en-US,en',
             ],
         },
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     },
 
     preNavigationHooks: [
         async ({ page }) => {
             await page.addInitScript(() => {
-                Object.defineProperty(navigator, 'webdriver',  { get: () => undefined });
-                Object.defineProperty(navigator, 'languages',  { get: () => ['en-US', 'en', 'th'] });
-                Object.defineProperty(navigator, 'platform',   { get: () => 'Win32' });
-                window.chrome = { runtime: {} };
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
             });
             await page.setExtraHTTPHeaders({
-                'Accept-Language':           'en-US,en;q=0.9,th;q=0.8',
-                'Accept':                    'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                'Accept-Encoding':           'gzip, deflate, br',
-                'Upgrade-Insecure-Requests': '1',
-                'Sec-Fetch-Dest':            'document',
-                'Sec-Fetch-Mode':            'navigate',
-                'Sec-Fetch-Site':            'none',
-                'Sec-Fetch-User':            '?1',
-                'Cache-Control':             'max-age=0',
+                'Accept-Language': 'en-US,en;q=0.9,th;q=0.8',
+                'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             });
         },
     ],
