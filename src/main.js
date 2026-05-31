@@ -24,7 +24,7 @@ const {
     minSize          = 0,
     maxSize          = 0,
     propertyType     = '',
-    distanceToMRT    = 0,
+    distanceToMRT    = '',
     freetext         = '',
     isCommercial     = false,
     maxListings      = 100,
@@ -47,7 +47,7 @@ function buildSearchUrl() {
     if (minSize > 0)   params.set('minSize', String(minSize));
     if (maxSize > 0)   params.set('maxSize', String(maxSize));
     if (propertyType)  params.set('propertyType', propertyType);
-    if (distanceToMRT > 0) params.set('distanceToMRT', String(distanceToMRT));
+    if (distanceToMRT)     params.set('distanceToMRT', distanceToMRT);
     if (freetext)      params.set('_freetextDisplay', freetext);
 
     // Bedrooms: DDProperty uses repeated params (?bedrooms=2&bedrooms=3)
