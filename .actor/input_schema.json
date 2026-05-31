@@ -13,6 +13,7 @@
     "listingType": {
       "title": "Listing Type",
       "type": "string",
+      "description": "Search for rental or sale properties.",
       "editor": "select",
       "enum": [
         "rent",
@@ -22,12 +23,12 @@
         "For Rent",
         "For Sale"
       ],
-      "default": "rent",
-      "description": "Search for rental or sale properties."
+      "default": "rent"
     },
     "regionCode": {
       "title": "Region / Province",
       "type": "string",
+      "description": "Thai province to search in.",
       "editor": "select",
       "enum": [
         "TH10",
@@ -53,13 +54,12 @@
         "Surat Thani (TH84)",
         "Krabi (TH85)"
       ],
-      "default": "TH10",
-      "description": "Thai province to search in."
+      "default": "TH10"
     },
     "bedrooms": {
       "title": "Bedrooms",
       "type": "array",
-      "description": "Leave empty for any.",
+      "description": "Select one or more bedroom counts. Leave empty for any.",
       "editor": "select",
       "items": {
         "type": "string",
@@ -89,31 +89,31 @@
     "minPrice": {
       "title": "Min Price (\u0e3f)",
       "type": "integer",
+      "description": "Minimum price in THB. Leave at 0 for no minimum.",
       "editor": "number",
       "default": 0,
-      "minimum": 0,
-      "description": "Minimum price in THB. Leave at 0 for no minimum."
+      "minimum": 0
     },
     "maxPrice": {
       "title": "Max Price (\u0e3f)",
       "type": "integer",
+      "description": "Maximum price in THB. Leave at 0 for no maximum.",
       "editor": "number",
       "default": 60000,
-      "minimum": 0,
-      "description": "Maximum price in THB. Leave at 0 for no maximum."
+      "minimum": 0
     },
     "minSize": {
       "title": "Min Size (sqm)",
       "type": "integer",
+      "description": "Minimum floor size in square metres. Leave at 0 for no minimum.",
       "editor": "number",
       "default": 80,
-      "minimum": 0,
-      "description": "Minimum floor size in square metres. Leave at 0 for no minimum."
+      "minimum": 0
     },
     "maxSize": {
       "title": "Max Size (sqm)",
       "type": "integer",
-      "description": "Leave at 0 for no maximum.",
+      "description": "Maximum floor size in square metres. Leave at 0 for no maximum.",
       "editor": "number",
       "default": 0,
       "minimum": 0
@@ -121,6 +121,7 @@
     "propertyType": {
       "title": "Property Type",
       "type": "string",
+      "description": "Filter by property type. Leave as Any to include all types.",
       "editor": "select",
       "enum": [
         "",
@@ -140,20 +141,20 @@
         "Land",
         "Commercial"
       ],
-      "default": "",
-      "description": "Filter by property type. Leave as Any to include all types."
+      "default": ""
     },
     "distanceToMRT": {
       "title": "Max Distance to MRT/BTS (km)",
-      "type": "number",
+      "type": "string",
+      "description": "Filter by maximum walking distance to nearest MRT/BTS station. Leave as Any for no filter.",
       "editor": "select",
       "enum": [
-        0,
-        0.5,
-        0.75,
-        1,
-        1.5,
-        2
+        "",
+        "0.5",
+        "0.75",
+        "1",
+        "1.5",
+        "2"
       ],
       "enumTitles": [
         "Any",
@@ -163,26 +164,25 @@
         "1.5 km",
         "2 km"
       ],
-      "default": 0,
-      "description": "Filter by maximum walking distance to nearest MRT/BTS station. Leave at Any for no filter."
+      "default": ""
     },
     "freetext": {
       "title": "Area / Keyword",
       "type": "string",
-      "description": "e.g. 'Ekkamai', 'Thonglor', 'Sukhumvit'",
+      "description": "Free-text area or keyword search, e.g. Ekkamai, Thonglor, Sukhumvit.",
       "editor": "textfield",
       "default": ""
     },
     "isCommercial": {
       "title": "Commercial Properties Only",
       "type": "boolean",
-      "default": false,
-      "description": "Toggle on to search commercial listings only."
+      "description": "Toggle on to search commercial listings only.",
+      "default": false
     },
     "maxListings": {
       "title": "Max Listings",
       "type": "integer",
-      "description": "0 = unlimited.",
+      "description": "Maximum total listings to scrape. 0 = unlimited.",
       "editor": "number",
       "default": 100,
       "minimum": 0
@@ -190,7 +190,7 @@
     "maxConcurrency": {
       "title": "Max Concurrency",
       "type": "integer",
-      "description": "Concurrent browser tabs. Keep at 2\u20134 to avoid blocks.",
+      "description": "Concurrent browser tabs. Keep at 2-4 to avoid blocks.",
       "editor": "number",
       "default": 3,
       "minimum": 1,
