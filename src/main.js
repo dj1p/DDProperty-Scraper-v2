@@ -29,7 +29,7 @@ const {
     isCommercial     = false,
     maxListings      = 100,
     maxConcurrency   = 3,
-    proxyConfiguration: proxyConfig = { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'] },
+    proxyConfiguration: proxyConfig = { useApifyProxy: true, apifyProxyGroups: ['DATACENTER'] },
 } = input;
 
 // ── Build search URL from filter fields ───────────────────────────────────────
@@ -222,18 +222,32 @@ const crawler = new PlaywrightCrawler({
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
                 '--disable-blink-features=AutomationControlled',
+                '--disable-infobars',
+                '--window-size=1920,1080',
+                '--lang=en-US,en',
             ],
         },
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     },
 
     preNavigationHooks: [
         async ({ page }) => {
             await page.addInitScript(() => {
-                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                Object.defineProperty(navigator, 'webdriver',  { get: () => undefined });
+                Object.defineProperty(navigator, 'languages',  { get: () => ['en-US', 'en', 'th'] });
+                Object.defineProperty(navigator, 'platform',   { get: () => 'Win32' });
+                window.chrome = { runtime: {} };
             });
             await page.setExtraHTTPHeaders({
-                'Accept-Language': 'en-US,en;q=0.9,th;q=0.8',
-                'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language':           'en-US,en;q=0.9,th;q=0.8',
+                'Accept':                    'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Encoding':           'gzip, deflate, br',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest':            'document',
+                'Sec-Fetch-Mode':            'navigate',
+                'Sec-Fetch-Site':            'none',
+                'Sec-Fetch-User':            '?1',
+                'Cache-Control':             'max-age=0',
             });
         },
     ],
